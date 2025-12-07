@@ -1,0 +1,67 @@
+name: Build static XMRig (x86_64 + ARM64)
+
+on:
+  workflow_dispatch:      # run manually from Actions tab
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-static-x86_64:
+    name: Static Linux x86_64
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build static binary in Alpine (x86_64)
+        run: |
+          docker run --rm -v "$PWD":/src -w /src alpine:3.20 sh -exc '
+            apk add --no-cache \
+              git make cmake libstdc++ gcc g++ \
+              automake libtool autoconf linux-headers
+
+            # Advanced static build (CPU-only) per xmrig Alpine docs
+            mkdir -p build
+            cd scripts
+            ./build_deps.sh
+            cd ../build
+            cmake .. -DXMRIG_DEPS=scripts/deps -DBUILD_STATIC=ON
+            make -j"$(nproc)"
+          '
+
+      - name: Upload x86_64 static binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: xmrig-linux-static-x86_64
+          path: build/xmrig
+
+  build-static-arm64:
+    name: Static Linux ARM64
+    runs-on: ubuntu-22.04-arm   # public repos only
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build static binary in Alpine (ARM64)
+        run: |
+          docker run --rm -v "$PWD":/src -w /src alpine:3.20 sh -exc '
+            apk add --no-cache \
+              git make cmake libstdc++ gcc g++ \
+              automake libtool autoconf linux-headers
+
+            # Advanced static build (CPU-only) per xmrig Alpine docs
+            mkdir -p build
+            cd scripts
+            ./build_deps.sh
+            cd ../build
+            cmake .. -DXMRIG_DEPS=scripts/deps -DBUILD_STATIC=ON
+            make -j"$(nproc)"
+          '
+
+      - name: Upload ARM64 static binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: xmrig-linux-static-arm64
+          path: build/xmrig
