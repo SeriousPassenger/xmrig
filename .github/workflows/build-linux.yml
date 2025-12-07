@@ -1,9 +1,12 @@
-name: Build static XMRig (x86_64 + ARM64)
+name: Build static XMRig and publish release
 
 on:
-  workflow_dispatch:      # run manually from Actions tab
   push:
-    branches: [ main, master ]
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # needed to create releases & upload assets
 
 jobs:
   build-static-x86_64:
@@ -21,7 +24,6 @@ jobs:
               git make cmake libstdc++ gcc g++ \
               automake libtool autoconf linux-headers
 
-            # Advanced static build (CPU-only) per xmrig Alpine docs
             mkdir -p build
             cd scripts
             ./build_deps.sh
@@ -30,7 +32,7 @@ jobs:
             make -j"$(nproc)"
           '
 
-      - name: Upload x86_64 static binary
+      - name: Upload x86_64 static binary as artifact
         uses: actions/upload-artifact@v4
         with:
           name: xmrig-linux-static-x86_64
@@ -38,7 +40,7 @@ jobs:
 
   build-static-arm64:
     name: Static Linux ARM64
-    runs-on: ubuntu-22.04-arm   # public repos only
+    runs-on: ubuntu-22.04-arm   # needs public repo to use hosted ARM runner
 
     steps:
       - name: Checkout source
@@ -51,7 +53,6 @@ jobs:
               git make cmake libstdc++ gcc g++ \
               automake libtool autoconf linux-headers
 
-            # Advanced static build (CPU-only) per xmrig Alpine docs
             mkdir -p build
             cd scripts
             ./build_deps.sh
@@ -60,8 +61,57 @@ jobs:
             make -j"$(nproc)"
           '
 
-      - name: Upload ARM64 static binary
+      - name: Upload ARM64 static binary as artifact
         uses: actions/upload-artifact@v4
         with:
           name: xmrig-linux-static-arm64
           path: build/xmrig
+
+  publish-release:
+    name: Create GitHub Release and upload binaries
+    runs-on: ubuntu-22.04
+    needs:
+      - build-static-x86_64
+    # If you want ARM64 too, also depend on it:
+      - build-static-arm64
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      # dist structure will be:
+      # dist/xmrig-linux-static-x86_64/xmrig
+      # dist/xmrig-linux-static-arm64/xmrig
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}    # e.g. v1.0.0
+          release_name: XMRig ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+      - name: Upload x86_64 binary to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/xmrig-linux-static-x86_64/xmrig
+          asset_name: xmrig-linux-static-x86_64
+          asset_content_type: application/octet-stream
+
+      - name: Upload ARM64 binary to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/xmrig-linux-static-arm64/xmrig
+          asset_name: xmrig-linux-static-arm64
+          asset_content_type: application/octet-stream
