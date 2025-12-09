@@ -77,30 +77,39 @@ jobs:
 
       - name: Build Termux aarch64 binary in termux-docker
         run: |
+          # NOTE: no --user 0, no root entrypoint; termux-docker forbids root.
+          # We build entirely in the Termux user's $HOME and stream xmrig back.
           docker run --rm \
-            --entrypoint /entrypoint_root.sh \
-            -v "$PWD":/src \
+            -v "$PWD":/src:ro \
             termux/termux-docker:aarch64 \
             bash -lc '
               set -euo pipefail
 
-              # Avoid interactive dpkg questions
+              export PREFIX=/data/data/com.termux/files/usr
+              export HOME=/data/data/com.termux/files/home
               export DEBIAN_FRONTEND=noninteractive
 
-              # Fix the "cannot locate symbol basic_ostringstream" C++ ABI mess:
-              # do a full upgrade *before* installing cmake, like the popular Termux xmrig scripts do.
-              apt-get update -y
-              apt-get upgrade -y \
+              # Work around dpkg conffile prompts for openssl.cnf
+              rm -f "$PREFIX/etc/tls/openssl.cnf" || true
+
+              # Keep Termux toolchain/libs in sync so cmake actually links
+              apt update -y
+              apt upgrade -y \
                 -o Dpkg::Options::="--force-confdef" \
                 -o Dpkg::Options::="--force-confold"
 
-              # Minimal toolchain for building xmrig
-              apt-get install -y git build-essential cmake
+              # Minimal deps for xmrig build on Termux
+              apt install -y \
+                git \
+                build-essential \
+                cmake \
+                libuv \
+                libmicrohttpd \
+                openssl \
+                jsoncpp
 
-              # Work in Termux $HOME so we definitely have write access
+              # Build in Termux home (we definitely have write access there)
               cd "$HOME"
-
-              # Copy the repo from the mounted volume into HOME
               rm -rf xmrig-src
               cp -a /src xmrig-src
               cd xmrig-src
@@ -108,13 +117,16 @@ jobs:
               mkdir -p build-termux
               cd build-termux
 
-              # Termux build: disable hwloc (no hwloc pkg in stock Termux)
-              cmake -DWITH_HWLOC=OFF ..
+              # Termux build: hwloc off, others autodetected from libs above
+              cmake .. \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DWITH_HWLOC=OFF
+
               make -j"$(nproc)"
 
-              # Copy built binary back out to the mounted workspace
-              cp ./xmrig /src/xmrig-termux-aarch64
-            '
+              # Stream resulting binary back to the host via stdout
+              cat ./xmrig
+            ' > xmrig-termux-aarch64
 
       - name: Upload Termux aarch64 binary as artifact
         uses: actions/upload-artifact@v4
