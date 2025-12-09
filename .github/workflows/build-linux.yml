@@ -77,7 +77,7 @@ jobs:
 
       - name: Build Termux aarch64 binary in termux-docker
         run: |
-          # NOTE: no --user 0, no root entrypoint; termux-docker forbids root.
+          # NOTE: no root; termux-docker forbids it.
           # We build entirely in the Termux user's $HOME and stream xmrig back.
           docker run --rm \
             -v "$PWD":/src:ro \
@@ -135,7 +135,7 @@ jobs:
           path: xmrig-termux-aarch64
 
   publish-release:
-    name: Create GitHub Release and upload binaries
+    name: Create / update GitHub Release and upload binaries
     runs-on: ubuntu-22.04
     needs:
       - build-static-x86_64
@@ -148,48 +148,23 @@ jobs:
         with:
           path: dist
 
-      # dist structure after this:
-      # dist/xmrig-linux-static-x86_64/xmrig
-      # dist/xmrig-linux-static-arm64/xmrig
-      # dist/xmrig-termux-aarch64/xmrig-termux-aarch64
+      - name: Rename artifacts to desired release asset names
+        run: |
+          mkdir -p release
+          cp dist/xmrig-linux-static-x86_64/xmrig        release/xmrig-linux-static-x86_64
+          cp dist/xmrig-linux-static-arm64/xmrig         release/xmrig-linux-static-arm64
+          cp dist/xmrig-termux-aarch64/xmrig-termux-aarch64 release/xmrig-termux-aarch64
 
-      - name: Create GitHub Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create or update GitHub Release and upload assets
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ github.ref_name }}    # e.g. v1.0.0
-          release_name: XMRig ${{ github.ref_name }}
+          tag: ${{ github.ref_name }}           # e.g. v1.0.0
+          name: XMRig ${{ github.ref_name }}
           draft: false
           prerelease: false
-
-      - name: Upload x86_64 binary to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: dist/xmrig-linux-static-x86_64/xmrig
-          asset_name: xmrig-linux-static-x86_64
-          asset_content_type: application/octet-stream
-
-      - name: Upload ARM64 binary to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: dist/xmrig-linux-static-arm64/xmrig
-          asset_name: xmrig-linux-static-arm64
-          asset_content_type: application/octet-stream
-
-      - name: Upload Termux ARM64 binary to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: dist/xmrig-termux-aarch64/xmrig-termux-aarch64
-          asset_name: xmrig-termux-aarch64
-          asset_content_type: application/octet-stream
+          allowUpdates: true                   # <--- important: avoid "already_exists"
+          artifacts: |
+            release/xmrig-linux-static-x86_64
+            release/xmrig-linux-static-arm64
+            release/xmrig-termux-aarch64
+          artifactContentType: application/octet-stream
