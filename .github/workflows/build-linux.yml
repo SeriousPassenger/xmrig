@@ -67,13 +67,49 @@ jobs:
           name: xmrig-linux-static-arm64
           path: build/xmrig
 
+  # NEW: Termux / Android aarch64 build
+  build-termux-arm64:
+    name: Termux ARM64 (Android)
+    runs-on: ubuntu-22.04-arm
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build XMRig inside Termux (ARM64)
+        run: |
+          # Run a Termux userland in Docker on the ARM runner
+          docker run --rm -v "$PWD":/src -w /src termux/termux-docker:aarch64 bash -lc '
+            # Basic toolchain + libs Termux builds usually need for xmrig
+            pkg update -y && pkg upgrade -y
+            pkg install -y git build-essential cmake libuv openssl libmicrohttpd
+
+            mkdir -p build-termux
+            cd build-termux
+
+            # HWLOC/OpenCL/CUDA generally not useful on Android phones + avoids extra deps
+            cmake .. \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DWITH_HWLOC=OFF \
+              -DWITH_OPENCL=OFF \
+              -DWITH_CUDA=OFF
+
+            make -j"$(nproc)"
+          '
+
+      - name: Upload Termux ARM64 binary as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xmrig-termux-arm64
+          path: build-termux/xmrig
+
   publish-release:
     name: Create GitHub Release and upload binaries
     runs-on: ubuntu-22.04
     needs:
       - build-static-x86_64
-    # If you want ARM64 too, also depend on it:
       - build-static-arm64
+      - build-termux-arm64    # <-- make sure we wait for the Termux job too
 
     steps:
       - name: Download build artifacts
@@ -84,6 +120,7 @@ jobs:
       # dist structure will be:
       # dist/xmrig-linux-static-x86_64/xmrig
       # dist/xmrig-linux-static-arm64/xmrig
+      # dist/xmrig-termux-arm64/xmrig
 
       - name: Create GitHub Release
         id: create_release
@@ -114,4 +151,14 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: dist/xmrig-linux-static-arm64/xmrig
           asset_name: xmrig-linux-static-arm64
+          asset_content_type: application/octet-stream
+
+      - name: Upload Termux ARM64 binary to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/xmrig-termux-arm64/xmrig
+          asset_name: xmrig-termux-arm64
           asset_content_type: application/octet-stream
