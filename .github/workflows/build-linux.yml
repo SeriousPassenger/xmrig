@@ -67,7 +67,6 @@ jobs:
           name: xmrig-linux-static-arm64
           path: build/xmrig
 
-  # NEW: Termux / Android aarch64 build
   build-termux-arm64:
     name: Termux ARM64 (Android)
     runs-on: ubuntu-22.04-arm
@@ -78,16 +77,29 @@ jobs:
 
       - name: Build XMRig inside Termux (ARM64)
         run: |
-          # Run a Termux userland in Docker on the ARM runner
-          docker run --rm -v "$PWD":/src -w /src termux/termux-docker:aarch64 bash -lc '
-            # Basic toolchain + libs Termux builds usually need for xmrig
-            pkg update -y && pkg upgrade -y
-            pkg install -y git build-essential cmake libuv openssl libmicrohttpd
+          docker run --rm --user 0 -v "$PWD":/src termux/termux-docker:aarch64 bash -lc '
+            set -e
+
+            cd /src
+
+            export PREFIX=/data/data/com.termux/files/usr
+            export HOME=/data/data/com.termux/files/home
+            export DEBIAN_FRONTEND=noninteractive
+
+            # Avoid interactive dpkg prompt on existing openssl.cnf
+            rm -f "$PREFIX/etc/tls/openssl.cnf" || true
+
+            pkg update -y
+            pkg install -y \
+              build-essential \
+              cmake \
+              libuv \
+              libmicrohttpd \
+              openssl
 
             mkdir -p build-termux
             cd build-termux
 
-            # HWLOC/OpenCL/CUDA generally not useful on Android phones + avoids extra deps
             cmake .. \
               -DCMAKE_BUILD_TYPE=Release \
               -DWITH_HWLOC=OFF \
@@ -109,7 +121,7 @@ jobs:
     needs:
       - build-static-x86_64
       - build-static-arm64
-      - build-termux-arm64    # <-- make sure we wait for the Termux job too
+      - build-termux-arm64
 
     steps:
       - name: Download build artifacts
