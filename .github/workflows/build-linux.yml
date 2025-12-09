@@ -67,57 +67,60 @@ jobs:
           name: xmrig-linux-static-arm64
           path: build/xmrig
 
-  build-termux-arm64:
-    name: Termux ARM64 (Android)
+  build-termux-aarch64:
+    name: Termux Android (aarch64)
     runs-on: ubuntu-22.04-arm
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Build XMRig inside Termux (ARM64)
+      - name: Build Termux aarch64 binary in termux-docker
         run: |
-          # /src is the repo, mounted read-only; we build inside Termux FS
-          docker run --rm -v "$PWD":/src:ro termux/termux-docker:aarch64 bash -lc '
-            set -e
+          docker run --rm \
+            --entrypoint /entrypoint_root.sh \
+            -v "$PWD":/src \
+            termux/termux-docker:aarch64 \
+            bash -lc '
+              set -euo pipefail
 
-            export PREFIX=/data/data/com.termux/files/usr
-            export HOME=/data/data/com.termux/files/home
-            export DEBIAN_FRONTEND=noninteractive
+              # Avoid interactive dpkg questions
+              export DEBIAN_FRONTEND=noninteractive
 
-            # Avoid interactive dpkg prompt on existing openssl.cnf if it exists
-            rm -f "$PREFIX/etc/tls/openssl.cnf" || true
+              # Fix the "cannot locate symbol basic_ostringstream" C++ ABI mess:
+              # do a full upgrade *before* installing cmake, like the popular Termux xmrig scripts do.
+              apt-get update -y
+              apt-get upgrade -y \
+                -o Dpkg::Options::="--force-confdef" \
+                -o Dpkg::Options::="--force-confold"
 
-            pkg update -y
-            pkg install -y \
-              build-essential \
-              cmake \
-              libuv \
-              libmicrohttpd \
-              openssl \
-              jsoncpp
+              # Minimal toolchain for building xmrig
+              apt-get install -y git build-essential cmake
 
-            mkdir -p "$HOME/build-termux"
-            cd "$HOME/build-termux"
+              # Work in Termux $HOME so we definitely have write access
+              cd "$HOME"
 
-            # Use /src (read-only) as the source tree
-            cmake /src \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DWITH_HWLOC=OFF \
-              -DWITH_OPENCL=OFF \
-              -DWITH_CUDA=OFF
+              # Copy the repo from the mounted volume into HOME
+              rm -rf xmrig-src
+              cp -a /src xmrig-src
+              cd xmrig-src
 
-            make -j"$(nproc)"
+              mkdir -p build-termux
+              cd build-termux
 
-            # Dump the binary to stdout so the *host* can redirect it into a file
-            cat xmrig
-          ' > xmrig-termux-arm64
+              # Termux build: disable hwloc (no hwloc pkg in stock Termux)
+              cmake -DWITH_HWLOC=OFF ..
+              make -j"$(nproc)"
 
-      - name: Upload Termux ARM64 binary as artifact
+              # Copy built binary back out to the mounted workspace
+              cp ./xmrig /src/xmrig-termux-aarch64
+            '
+
+      - name: Upload Termux aarch64 binary as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: xmrig-termux-arm64
-          path: xmrig-termux-arm64
+          name: xmrig-termux-aarch64
+          path: xmrig-termux-aarch64
 
   publish-release:
     name: Create GitHub Release and upload binaries
@@ -125,7 +128,7 @@ jobs:
     needs:
       - build-static-x86_64
       - build-static-arm64
-      - build-termux-arm64
+      - build-termux-aarch64
 
     steps:
       - name: Download build artifacts
@@ -133,10 +136,10 @@ jobs:
         with:
           path: dist
 
-      # dist structure will be:
+      # dist structure after this:
       # dist/xmrig-linux-static-x86_64/xmrig
       # dist/xmrig-linux-static-arm64/xmrig
-      # dist/xmrig-termux-arm64/xmrig-termux-arm64
+      # dist/xmrig-termux-aarch64/xmrig-termux-aarch64
 
       - name: Create GitHub Release
         id: create_release
@@ -175,6 +178,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: dist/xmrig-termux-arm64/xmrig-termux-arm64
-          asset_name: xmrig-termux-arm64
+          asset_path: dist/xmrig-termux-aarch64/xmrig-termux-aarch64
+          asset_name: xmrig-termux-aarch64
           asset_content_type: application/octet-stream
